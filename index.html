@@ -70,11 +70,11 @@
 
         window.Telegram.WebApp.expand();
 
-        // 🚀 FETCH FROM NEW ENTERPRISE DATABASE
-        fetch(`https://api.restful-api.dev/objects/${testId}`)
+        // 🚀 FETCH FROM JSONBIN DATABASE
+        fetch(`https://api.jsonbin.io/v3/b/${testId}`)
             .then(res => res.json())
             .then(obj => {
-                questions = obj.data.questions;
+                questions = obj.record.questions;
                 document.getElementById('loader').style.display = 'none';
                 document.getElementById('exam-ui').style.display = 'flex';
                 buildGrid();
@@ -139,20 +139,17 @@
             document.getElementById('loader').innerText = "Uploading Results... Please wait ⏳";
             document.getElementById('loader').style.display = 'block';
 
-            let resultPayload = { 
-                name: "Submission_" + testId,
-                data: { test_id: testId, answers: answers } 
-            };
+            let resultPayload = { test_id: testId, answers: answers };
 
-            // 🚀 UPLOAD RESULT TO NEW ENTERPRISE DATABASE
-            fetch('https://api.restful-api.dev/objects', {
+            // 🚀 UPLOAD RESULT TO JSONBIN
+            fetch('https://api.jsonbin.io/v3/b', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(resultPayload)
             })
             .then(res => res.json())
             .then(obj => {
-                let resultId = obj.id; 
+                let resultId = obj.metadata.id; 
                 window.Telegram.WebApp.openTelegramLink(`https://t.me/${botUsername}?start=res_${resultId}`);
                 window.Telegram.WebApp.close();
             })
