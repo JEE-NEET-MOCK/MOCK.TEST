@@ -15,30 +15,24 @@
         .question-box { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 20px; font-size: 17px; overflow-x: auto;}
         .options button { display: block; width: 100%; padding: 12px; margin: 8px 0; border: 2px solid #e5e7eb; border-radius: 8px; background: white; text-align: left; font-size: 16px; cursor: pointer; transition: 0.2s;}
         .options button.selected { background: #dbeafe; border-color: #3b82f6; }
-        
-        /* NTA Style Grid Area */
         .bottom-area { background: white; border-top: 2px solid #e5e7eb; }
         .grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; padding: 15px; max-height: 150px; overflow-y: auto; background: #f9fafb;}
         .grid-btn { padding: 8px 0; border-radius: 5px; border: 1px solid #d1d5db; background: white; font-weight: bold; cursor: pointer; text-align: center;}
         .grid-btn.answered { background: #22c55e; color: white; border: none; }
         .grid-btn.marked { background: #a855f7; color: white; border: none; }
         .grid-btn.active { box-shadow: 0 0 0 2px #1d4ed8; }
-        
-        /* Navigation Controls */
         .controls { display: flex; justify-content: space-between; padding: 10px 15px;}
         .btn { padding: 10px 12px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; color: white; flex: 1; margin: 0 5px;}
         .btn-prev { background: #6b7280; }
         .btn-mark { background: #a855f7; }
         .btn-next { background: #3b82f6; }
         .btn-submit { background: #ef4444; width: 100%; padding: 15px; font-size: 18px; font-weight: bold; color: white; border: none; cursor: pointer;}
-        
         #loader { text-align: center; margin-top: 50%; font-size: 20px; font-weight: bold; color: #3b82f6; }
     </style>
 </head>
 <body>
 
     <div class="header" id="timer">⏱ Loading Test...</div>
-
     <div id="loader">Fetching Questions... Please wait ⏳</div>
 
     <div class="container" id="exam-ui" style="display: none;">
@@ -74,20 +68,20 @@
         let answers = {};
         let statuses = {}; 
 
-        window.Telegram.WebApp.expand(); // Opens app in full screen
+        window.Telegram.WebApp.expand();
 
-        // 1. Fetch Questions from Free Database (Npoint)
-        fetch(`https://api.npoint.io/${testId}`)
+        // 🚀 FETCH FROM NEW ENTERPRISE DATABASE
+        fetch(`https://api.restful-api.dev/objects/${testId}`)
             .then(res => res.json())
-            .then(data => {
-                questions = data;
+            .then(obj => {
+                questions = obj.data.questions;
                 document.getElementById('loader').style.display = 'none';
                 document.getElementById('exam-ui').style.display = 'flex';
                 buildGrid();
                 showQuestion(0);
-                startTimer(questions.length * 2 * 60); // 2 mins per question
+                startTimer(questions.length * 2 * 60);
             })
-            .catch(err => alert("Error loading test! " + err));
+            .catch(err => alert("Database Error: " + err));
 
         function buildGrid() {
             const grid = document.getElementById('q-grid');
@@ -105,26 +99,17 @@
         function showQuestion(idx) {
             currentIdx = idx;
             document.getElementById('q-no').innerText = `Question ${idx + 1} of ${questions.length}`;
-            
-            // Format MathJax LaTeX
             let qData = questions[idx];
             let latexCode = qData.l ? `\\[ \\begin{aligned} ${qData.l} \\end{aligned} \\]` : qData.p.replace(/\n/g, '<br><br>');
             document.getElementById('q-text').innerHTML = latexCode;
-            
-            // Re-render Math
             MathJax.typesetPromise();
 
-            // Highlight selected option
             ['A', 'B', 'C', 'D'].forEach(opt => {
                 let btn = document.getElementById('opt-' + opt);
-                if(answers[idx] === opt) {
-                    btn.classList.add('selected');
-                } else {
-                    btn.classList.remove('selected');
-                }
+                if(answers[idx] === opt) btn.classList.add('selected');
+                else btn.classList.remove('selected');
             });
 
-            // Update grid highlight
             document.querySelectorAll('.grid-btn').forEach(b => b.classList.remove('active'));
             document.getElementById('grid-' + idx).classList.add('active');
         }
@@ -147,7 +132,6 @@
             if(newIdx >= 0 && newIdx < questions.length) showQuestion(newIdx);
         }
 
-        // 2. Submit Logic (Save answers and redirect back to bot)
         function submitExam() {
             if(!confirm("Are you sure you want to submit the exam?")) return;
             
@@ -155,18 +139,20 @@
             document.getElementById('loader').innerText = "Uploading Results... Please wait ⏳";
             document.getElementById('loader').style.display = 'block';
 
-            let resultData = { test_id: testId, answers: answers };
+            let resultPayload = { 
+                name: "Submission_" + testId,
+                data: { test_id: testId, answers: answers } 
+            };
 
-            // Upload results to free database
-            fetch('https://api.npoint.io', {
+            // 🚀 UPLOAD RESULT TO NEW ENTERPRISE DATABASE
+            fetch('https://api.restful-api.dev/objects', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(resultData)
+                body: JSON.stringify(resultPayload)
             })
             .then(res => res.json())
-            .then(data => {
-                let resultId = data.id; // Get the ID of the saved result
-                // Redirect back to Telegram Bot with the result ID!
+            .then(obj => {
+                let resultId = obj.id; 
                 window.Telegram.WebApp.openTelegramLink(`https://t.me/${botUsername}?start=res_${resultId}`);
                 window.Telegram.WebApp.close();
             })
@@ -187,4 +173,3 @@
     </script>
 </body>
 </html>
-
