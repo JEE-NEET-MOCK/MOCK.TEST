@@ -33,7 +33,7 @@
 <body>
 
     <div class="header" id="timer">⏱ Loading Test...</div>
-    <div id="loader">Fetching Questions... Please wait ⏳</div>
+    <div id="loader">Connecting to Telegram Secure Server... ⏳</div>
 
     <div class="container" id="exam-ui" style="display: none;">
         <div class="main">
@@ -61,6 +61,7 @@
     <script>
         const urlParams = new URLSearchParams(window.location.search);
         const testId = urlParams.get('testid');
+        const tPath = urlParams.get('tpath');
         const botUsername = urlParams.get('bot');
         
         let questions = [];
@@ -70,18 +71,24 @@
 
         window.Telegram.WebApp.expand();
 
-        // 🚀 FETCH FROM JSONBIN DATABASE
-        fetch(`https://api.jsonbin.io/v3/b/${testId}`)
+        // 🚀 FETCH SECURELY FROM TELEGRAM'S OWN SERVER (ZERO CRASHES)
+        fetch(`https://api.telegra.ph/getPage/${tPath}?return_content=true`)
             .then(res => res.json())
-            .then(obj => {
-                questions = obj.record.questions;
+            .then(data => {
+                let jsonString = "";
+                data.result.content.forEach(p => {
+                    if (p.children && p.children.length > 0 && typeof p.children[0] === 'string') {
+                        jsonString += p.children[0];
+                    }
+                });
+                questions = JSON.parse(jsonString);
                 document.getElementById('loader').style.display = 'none';
                 document.getElementById('exam-ui').style.display = 'flex';
                 buildGrid();
                 showQuestion(0);
                 startTimer(questions.length * 2 * 60);
             })
-            .catch(err => alert("Database Error: " + err));
+            .catch(err => alert("Secure Load Error: " + err));
 
         function buildGrid() {
             const grid = document.getElementById('q-grid');
@@ -132,28 +139,38 @@
             if(newIdx >= 0 && newIdx < questions.length) showQuestion(newIdx);
         }
 
+        // 🚀 OFFLINE COMPRESSION ALGORITHM (NO DATABASE UPLOAD NEEDED)
+        function encodeAnswers() {
+            let charSet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+            let encoded = "";
+            let total = questions.length;
+            for (let i = 0; i < total; i += 3) {
+                let val = 0;
+                for (let j = 0; j < 3; j++) {
+                    let ans = answers[i + j];
+                    let mult = 0;
+                    if (ans === 'A') mult = 1;
+                    else if (ans === 'B') mult = 2;
+                    else if (ans === 'C') mult = 3;
+                    else if (ans === 'D') mult = 4;
+                    val = val * 5 + mult;
+                }
+                encoded += charSet[val];
+            }
+            return encoded;
+        }
+
         function submitExam() {
             if(!confirm("Are you sure you want to submit the exam?")) return;
             
             document.getElementById('exam-ui').style.display = 'none';
-            document.getElementById('loader').innerText = "Uploading Results... Please wait ⏳";
+            document.getElementById('loader').innerText = "Calculating Scores... 🚀";
             document.getElementById('loader').style.display = 'block';
 
-            let resultPayload = { test_id: testId, answers: answers };
-
-            // 🚀 UPLOAD RESULT TO JSONBIN
-            fetch('https://api.jsonbin.io/v3/b', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(resultPayload)
-            })
-            .then(res => res.json())
-            .then(obj => {
-                let resultId = obj.metadata.id; 
-                window.Telegram.WebApp.openTelegramLink(`https://t.me/${botUsername}?start=res_${resultId}`);
-                window.Telegram.WebApp.close();
-            })
-            .catch(err => alert("Error submitting! Try again."));
+            let payload = encodeAnswers();
+            // Send Data instantly back to Telegram without any Database!
+            window.Telegram.WebApp.openTelegramLink(`https://t.me/${botUsername}?start=res_${testId}_${payload}`);
+            window.Telegram.WebApp.close();
         }
 
         function startTimer(duration) {
