@@ -92,6 +92,7 @@
 
         window.Telegram.WebApp.expand();
 
+        // Decode Base64 Data
         fetch(`https://api.telegra.ph/getPage/${tPath}?return_content=true`)
             .then(res => res.json())
             .then(data => {
@@ -134,15 +135,17 @@
             }
         }
 
+        // Show Subject and Render Math
         function showQuestion(idx) {
             currentIdx = idx;
-            document.getElementById('q-no').innerText = `Question ${idx + 1} of ${questions.length}`;
             let qData = questions[idx];
+            
+            let subjectName = qData.s ? qData.s : "Subject";
+            document.getElementById('q-no').innerHTML = `<span style="color: #3b82f6;">[${subjectName}]</span> Question ${idx + 1} of ${questions.length}`;
             
             let content = qData.l ? qData.l : qData.p;
             document.getElementById('q-text').innerHTML = content;
             
-            // 🔥 THE FIX: Tell MathJax to explicitly Re-Compile the new question!
             if (window.MathJax && window.MathJax.typesetPromise) {
                 MathJax.typesetClear([document.getElementById('q-text')]);
                 MathJax.typesetPromise([document.getElementById('q-text')]).catch(err => console.log(err));
