@@ -6,13 +6,19 @@
     <title>CBT Exam System</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
-    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    
     <script>
         window.MathJax = {
-          tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] },
+          tex: { 
+            inlineMath: [['$', '$'], ['\\(', '\\)']], 
+            displayMath: [['$$', '$$'], ['\\[', '\\]']],
+            processEscapes: true
+          },
           chtml: { displayAlign: 'left' }
         };
     </script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; background: #f3f4f6; color: #1f2937; }
         .header { background: #2563eb; color: white; padding: 15px; text-align: center; font-size: 18px; font-weight: bold; position: sticky; top: 0; z-index: 100;}
@@ -86,7 +92,6 @@
 
         window.Telegram.WebApp.expand();
 
-        // 🔥 THE FIX: Fetch Base64 data and decode it safely
         fetch(`https://api.telegra.ph/getPage/${tPath}?return_content=true`)
             .then(res => res.json())
             .then(data => {
@@ -103,7 +108,6 @@
                     }
                 });
                 
-                // Decode the encrypted Base64 string back to JSON
                 let jsonString = window.atob(b64String.trim());
                 questions = JSON.parse(jsonString);
                 
@@ -114,7 +118,6 @@
                 startTimer(questions.length * 2 * 60);
             })
             .catch(err => {
-                // If it fails, it will show EXACTLY what went wrong on screen
                 document.getElementById('loader').innerHTML = `❌ Data Decoding Error.<br>Details: ${err.message}`;
             });
 
@@ -138,7 +141,12 @@
             
             let content = qData.l ? qData.l : qData.p;
             document.getElementById('q-text').innerHTML = content;
-            MathJax.typesetPromise();
+            
+            // 🔥 THE FIX: Tell MathJax to explicitly Re-Compile the new question!
+            if (window.MathJax && window.MathJax.typesetPromise) {
+                MathJax.typesetClear([document.getElementById('q-text')]);
+                MathJax.typesetPromise([document.getElementById('q-text')]).catch(err => console.log(err));
+            }
 
             ['A', 'B', 'C', 'D'].forEach(opt => {
                 let btn = document.getElementById('opt-' + opt);
