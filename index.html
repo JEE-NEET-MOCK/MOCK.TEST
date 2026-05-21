@@ -19,14 +19,13 @@
         .container { display: flex; flex-direction: column; height: calc(100vh - 54px); }
         .main { padding: 15px; flex: 1; overflow-y: auto; }
         
-        /* 🔥 NEW CSS: Line Break & Word Wrap Fix */
         .question-box { 
             background: white; padding: 20px; border-radius: 10px; 
             box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 20px; 
             font-size: 17px; line-height: 1.6;
-            white-space: normal;       /* Allows standard text wrapping */
-            word-wrap: break-word;     /* Breaks long words/equations if needed */
-            overflow-x: auto;          /* Only slide if a single math equation is too huge */
+            white-space: normal; 
+            word-wrap: break-word; 
+            overflow-x: auto; 
         }
         
         .options button { display: block; width: 100%; padding: 12px; margin: 8px 0; border: 2px solid #e5e7eb; border-radius: 8px; background: white; text-align: left; font-size: 16px; cursor: pointer; transition: 0.2s; line-height: 1.4;}
@@ -43,7 +42,7 @@
         .btn-mark { background: #a855f7; }
         .btn-next { background: #3b82f6; }
         .btn-submit { background: #ef4444; width: 100%; padding: 15px; font-size: 18px; font-weight: bold; color: white; border: none; cursor: pointer;}
-        #loader { text-align: center; margin-top: 50%; font-size: 20px; font-weight: bold; color: #3b82f6; }
+        #loader { text-align: center; margin-top: 50%; font-size: 20px; font-weight: bold; color: #3b82f6; padding: 20px;}
     </style>
 </head>
 <body>
@@ -87,23 +86,37 @@
 
         window.Telegram.WebApp.expand();
 
+        // 🔥 THE FIX: Fetch Base64 data and decode it safely
         fetch(`https://api.telegra.ph/getPage/${tPath}?return_content=true`)
             .then(res => res.json())
             .then(data => {
-                let jsonString = "";
+                if(!data.ok) throw new Error("API Not OK");
+                
+                let b64String = "";
                 data.result.content.forEach(p => {
-                    if (p.children && p.children.length > 0 && typeof p.children[0] === 'string') {
-                        jsonString += p.children[0];
+                    if (p.children) {
+                        p.children.forEach(child => {
+                            if (typeof child === 'string') {
+                                b64String += child;
+                            }
+                        });
                     }
                 });
+                
+                // Decode the encrypted Base64 string back to JSON
+                let jsonString = window.atob(b64String.trim());
                 questions = JSON.parse(jsonString);
+                
                 document.getElementById('loader').style.display = 'none';
                 document.getElementById('exam-ui').style.display = 'flex';
                 buildGrid();
                 showQuestion(0);
                 startTimer(questions.length * 2 * 60);
             })
-            .catch(err => alert("Secure Load Error: " + err));
+            .catch(err => {
+                // If it fails, it will show EXACTLY what went wrong on screen
+                document.getElementById('loader').innerHTML = `❌ Data Decoding Error.<br>Details: ${err.message}`;
+            });
 
         function buildGrid() {
             const grid = document.getElementById('q-grid');
@@ -118,7 +131,6 @@
             }
         }
 
-        // 🔥 NEW JAVASCRIPT: Directly inject text (No forced Math wrapping)
         function showQuestion(idx) {
             currentIdx = idx;
             document.getElementById('q-no').innerText = `Question ${idx + 1} of ${questions.length}`;
@@ -173,3 +185,32 @@
                 }
                 encoded += charSet[val];
             }
+            return encoded;
+        }
+
+        function submitExam() {
+            if(!confirm("Are you sure you want to submit the exam?")) return;
+            
+            document.getElementById('exam-ui').style.display = 'none';
+            document.getElementById('loader').innerText = "Calculating Scores... 🚀";
+            document.getElementById('loader').style.display = 'block';
+
+            let payload = encodeAnswers();
+            window.Telegram.WebApp.openTelegramLink(`https://t.me/${botUsername}?start=res_${testId}_${payload}`);
+            window.Telegram.WebApp.close();
+        }
+
+        function startTimer(duration) {
+            let timer = duration, minutes, seconds;
+            setInterval(function () {
+                minutes = parseInt(timer / 60, 10);
+                seconds = parseInt(timer % 60, 10);
+                minutes = minutes < 10 ? "0" + minutes : minutes;
+                seconds = seconds < 10 ? "0" + seconds : seconds;
+                document.getElementById('timer').textContent = "⏱ Time Remaining: " + minutes + ":" + seconds;
+                if (--timer < 0) submitExam();
+            }, 1000);
+        }
+    </script>
+</body>
+</html>
