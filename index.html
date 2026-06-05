@@ -61,10 +61,7 @@
             <h3 style="margin-top: 0;" id="q-no">Question 1</h3>
             <div class="question-box" id="q-text"></div>
             <div class="options" id="options-container">
-                <button onclick="selectOption('A')" id="opt-A">A</button>
-                <button onclick="selectOption('B')" id="opt-B">B</button>
-                <button onclick="selectOption('C')" id="opt-C">C</button>
-                <button onclick="selectOption('D')" id="opt-D">D</button>
+                <!-- Dynamically generated -->
             </div>
         </div>
 
@@ -109,7 +106,7 @@
                     }
                 });
                 
-                let jsonString = window.atob(b64String.trim());
+                let jsonString = decodeURIComponent(escape(window.atob(b64String.trim())));
                 questions = JSON.parse(jsonString);
                 
                 document.getElementById('loader').style.display = 'none';
@@ -135,7 +132,6 @@
             }
         }
 
-        // Show Subject and Render Math
         function showQuestion(idx) {
             currentIdx = idx;
             let qData = questions[idx];
@@ -151,11 +147,27 @@
                 MathJax.typesetPromise([document.getElementById('q-text')]).catch(err => console.log(err));
             }
 
-            ['A', 'B', 'C', 'D'].forEach(opt => {
-                let btn = document.getElementById('opt-' + opt);
-                if(answers[idx] === opt) btn.classList.add('selected');
-                else btn.classList.remove('selected');
-            });
+            const optionsContainer = document.getElementById('options-container');
+            optionsContainer.innerHTML = '';
+
+            if (qData.type === 'INTEGER') {
+                let val = answers[idx] || '';
+                optionsContainer.innerHTML = `
+                    <div style="margin-top: 15px;">
+                        <label style="font-weight: bold; font-size: 16px;">Type your integer answer:</label><br>
+                        <input type="number" id="int-input" value="${val}" oninput="selectInteger(this.value)" placeholder="Enter number..." style="width: 100%; padding: 12px; margin-top: 10px; border: 2px solid #e5e7eb; border-radius: 8px; font-size: 18px; box-sizing: border-box;">
+                    </div>
+                `;
+            } else {
+                ['A', 'B', 'C', 'D'].forEach(opt => {
+                    let btn = document.createElement('button');
+                    btn.id = 'opt-' + opt;
+                    btn.onclick = () => selectOption(opt);
+                    btn.innerText = opt;
+                    if(answers[idx] === opt) btn.classList.add('selected');
+                    optionsContainer.appendChild(btn);
+                });
+            }
 
             document.querySelectorAll('.grid-btn').forEach(b => b.classList.remove('active'));
             document.getElementById('grid-' + idx).classList.add('active');
@@ -166,6 +178,18 @@
             statuses[currentIdx] = 'answered';
             document.getElementById('grid-' + currentIdx).className = 'grid-btn answered active';
             showQuestion(currentIdx);
+        }
+
+        function selectInteger(val) {
+            if (val.trim() !== '') {
+                answers[currentIdx] = val.trim();
+                statuses[currentIdx] = 'answered';
+                document.getElementById('grid-' + currentIdx).className = 'grid-btn answered active';
+            } else {
+                delete answers[currentIdx];
+                statuses[currentIdx] = 'unanswered';
+                document.getElementById('grid-' + currentIdx).className = 'grid-btn active';
+            }
         }
 
         function markReview() {
@@ -179,36 +203,46 @@
             if(newIdx >= 0 && newIdx < questions.length) showQuestion(newIdx);
         }
 
-        function encodeAnswers() {
-            let charSet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-            let encoded = "";
-            let total = questions.length;
-            for (let i = 0; i < total; i += 3) {
-                let val = 0;
-                for (let j = 0; j < 3; j++) {
-                    let ans = answers[i + j];
-                    let mult = 0;
-                    if (ans === 'A') mult = 1;
-                    else if (ans === 'B') mult = 2;
-                    else if (ans === 'C') mult = 3;
-                    else if (ans === 'D') mult = 4;
-                    val = val * 5 + mult;
-                }
-                encoded += charSet[val];
-            }
-            return encoded;
-        }
-
-        function submitExam() {
+        async function submitExam() {
             if(!confirm("Are you sure you want to submit the exam?")) return;
             
             document.getElementById('exam-ui').style.display = 'none';
-            document.getElementById('loader').innerText = "Calculating Scores... 🚀";
+            document.getElementById('loader').innerText = "Uploading Answers... 🚀";
             document.getElementById('loader').style.display = 'block';
 
-            let payload = encodeAnswers();
-            window.Telegram.WebApp.openTelegramLink(`https://t.me/${botUsername}?start=res_${testId}_${payload}`);
-            window.Telegram.WebApp.close();
+            try {
+                // 1. Create temporary Telegraph account to store answers
+                let accRes = await fetch('https://api.telegra.ph/createAccount?short_name=ExamUser&author_name=ExamUser');
+                let accData = await accRes.json();
+                let token = accData.result.access_token;
+
+                // 2. Prepare payload string securely
+                let ansJson = JSON.stringify(answers);
+                let b64Ans = window.btoa(unescape(encodeURIComponent(ansJson)));
+                
+                // 3. Create Page to store payload
+                let pageRes = await fetch('https://api.telegra.ph/createPage', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        access_token: token,
+                        title: 'AnswersPayload',
+                        content: [{"tag": "p", "children": [b64Ans]}]
+                    })
+                });
+                let pageData = await pageRes.json();
+                let ansPath = pageData.result.path;
+
+                // 4. Send the path back to the bot
+                let payload = `res_${testId}_${ansPath}`;
+                window.Telegram.WebApp.openTelegramLink(`https://t.me/${botUsername}?start=${payload}`);
+                window.Telegram.WebApp.close();
+
+            } catch (err) {
+                alert("Failed to submit: " + err.message);
+                document.getElementById('loader').style.display = 'none';
+                document.getElementById('exam-ui').style.display = 'flex';
+            }
         }
 
         function startTimer(duration) {
