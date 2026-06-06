@@ -171,10 +171,11 @@ async def generate_test_logic(event, subject, num_q, target_channel=None):
     web_app_url = f"{YOUR_GITHUB_WEBSITE}/?testid={db_id}&tpath={telegraph_path}&bot={bot_info.username}"
     share_url = f"https://t.me/share/url?url={web_app_url}&text=Take%20this%20{test_name.replace(' ', '%20')}%20Challenge!"
     
+    suggested_time = 180 if len(exam_questions) == 75 else len(exam_questions) * 2
     text = (f"🎯 **YOUR CUSTOM TEST IS READY!** 🎯\n\n"
             f"📌 **Topic:** `{test_name}`\n"
             f"🔢 **Questions:** `{len(exam_questions)}`\n"
-            f"⏳ **Suggested Time:** `{len(exam_questions) * 2} Mins`\n\n"
+            f"⏳ **Suggested Time:** `{suggested_time} Mins`\n\n"
             f"👇 *Click below to start or share it to your group!* 👇")
             
     buttons = [
