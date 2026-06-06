@@ -108,20 +108,24 @@ async def generate_test(event):
 async def generate_test_logic(event, subject, num_q, target_channel=None):
     msg = await event.respond("⏳ Generating your custom test from the cloud database...") if target_channel else await event.edit("⏳ Generating your custom test from the cloud database...")
     
-    conn = get_db()
-    c = conn.cursor()
-    
-    if subject == "Full":
-        questions_db = []
-        for s in ["physics", "chemistry", "mathematics"]:
-            c.execute("SELECT subject, question_text, correct_option FROM questions WHERE subject=%s ORDER BY RANDOM() LIMIT 25", (s,))
-            questions_db.extend(c.fetchall())
-    else:
-        db_subj = subject.lower()
-        c.execute("SELECT subject, question_text, correct_option FROM questions WHERE subject=%s ORDER BY RANDOM() LIMIT %s", (db_subj, num_q))
-        questions_db = c.fetchall()
+    try:
+        conn = get_db()
+        c = conn.cursor()
         
-    conn.close()
+        if subject == "Full":
+            questions_db = []
+            for s in ["physics", "chemistry", "mathematics"]:
+                c.execute("SELECT subject, question_text, correct_option FROM questions WHERE subject=%s ORDER BY RANDOM() LIMIT 25", (s,))
+                questions_db.extend(c.fetchall())
+        else:
+            db_subj = subject.lower()
+            c.execute("SELECT subject, question_text, correct_option FROM questions WHERE subject=%s ORDER BY RANDOM() LIMIT %s", (db_subj, num_q))
+            questions_db = c.fetchall()
+            
+        conn.close()
+    except Exception as e:
+        await msg.edit(f"❌ Database Error: {e}")
+        return
     
     if not questions_db:
         await msg.edit("❌ Not enough questions in the database for this subject yet!")
@@ -138,10 +142,13 @@ async def generate_test_logic(event, subject, num_q, target_channel=None):
         })
         
     test_name = f"{subject} Practice Test"
-    telegraph_path = await create_telegraph_page(test_name, exam_questions)
-    
-    if not telegraph_path:
-        await msg.edit("❌ Failed to generate Secure Link. Try again.")
+    try:
+        telegraph_path = await create_telegraph_page(test_name, exam_questions)
+        if not telegraph_path:
+            await msg.edit("❌ Failed to generate Secure Link (Telegraph API returned None). Try again.")
+            return
+    except Exception as e:
+        await msg.edit(f"❌ Telegraph API Error: {e}")
         return
         
     db_id = ''.join(random.choices(string.ascii_letters + string.digits, k=6))
