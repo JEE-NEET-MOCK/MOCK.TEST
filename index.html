@@ -210,34 +210,21 @@
             document.getElementById('loader').innerText = "Uploading Answers... 🚀";
             document.getElementById('loader').style.display = 'block';
 
+            document.getElementById('loader').innerText = "Submitting Answers... 🚀";
+            document.getElementById('loader').style.display = 'block';
+
             try {
-                // 1. Create temporary Telegraph account to store answers
-                let accRes = await fetch('https://api.telegra.ph/createAccount?short_name=ExamUser&author_name=ExamUser');
-                let accData = await accRes.json();
-                let token = accData.result.access_token;
+                // Generate compact string: 'A', 'B', 'C', 'D' or 'X' for unattempted
+                let ansStr = "";
+                for (let i = 0; i < questions.length; i++) {
+                    let userAns = answers[i] || "X";
+                    ansStr += userAns;
+                }
 
-                // 2. Prepare payload string securely
-                let ansJson = JSON.stringify(answers);
-                let b64Ans = window.btoa(unescape(encodeURIComponent(ansJson)));
-                
-                // 3. Create Page to store payload
-                let pageRes = await fetch('https://api.telegra.ph/createPage', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        access_token: token,
-                        title: 'AnswersPayload',
-                        content: [{"tag": "p", "children": [b64Ans]}]
-                    })
-                });
-                let pageData = await pageRes.json();
-                let ansPath = pageData.result.path;
-
-                // 4. Send the path back to the bot
-                let payload = `res_${testId}_${ansPath}`;
+                // Send the path back to the bot
+                let payload = `res_${testId}_${ansStr}`;
                 window.Telegram.WebApp.openTelegramLink(`https://t.me/${botUsername}?start=${payload}`);
                 window.Telegram.WebApp.close();
-
             } catch (err) {
                 alert("Failed to submit: " + err.message);
                 document.getElementById('loader').style.display = 'none';
