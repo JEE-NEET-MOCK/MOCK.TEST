@@ -165,6 +165,9 @@ async def generate_test_logic(event, subject, num_q, target_channel=None):
     
     if target_channel:
         await client.send_message(target_channel, text, buttons=[[Button.url("💻 OPEN EXAM SCREEN", web_app_url)]])
+        lb_msg = await client.send_message(target_channel, f"🏆 **LEADERBOARD FOR: {test_name}** 🏆\n\nNo scores yet. Be the first!")
+        active_tests[db_id]["lb_msg_id"] = lb_msg.id
+        save_state(bot_state)
         await msg.edit("✅ Test successfully generated and sent to the channel!")
     else:
         await msg.edit(text, buttons=buttons)
@@ -234,33 +237,36 @@ async def receive_submission(event):
     
     await event.respond(text)
     
-    # Update leaderboard in channel
-    await update_channel_leaderboard()
+    # Update individual leaderboard in channel
+    await update_channel_leaderboard(test_id)
     
-async def update_channel_leaderboard():
+async def update_channel_leaderboard(test_id):
+    if test_id not in active_tests:
+        return
+        
+    lb_msg_id = active_tests[test_id].get("lb_msg_id")
+    if not lb_msg_id:
+        return
+        
     channel_id = -1002457209121
     conn = get_db()
     c = conn.cursor()
-    c.execute("SELECT username, score, timestamp FROM leaderboard ORDER BY score DESC, timestamp ASC LIMIT 10")
+    c.execute("SELECT username, score FROM leaderboard WHERE test_id=%s ORDER BY score DESC, timestamp ASC LIMIT 15", (test_id,))
     leaders = c.fetchall()
     conn.close()
     
     if not leaders:
         return
         
-    text = "🏆 **GLOBAL CHANNEL LEADERBOARD** 🏆\n\n"
+    test_name = active_tests[test_id]["name"]
+    text = f"🏆 **LEADERBOARD FOR: {test_name}** 🏆\n\n"
     medals = ["🥇", "🥈", "🥉"]
     for i, row in enumerate(leaders):
         medal = medals[i] if i < 3 else f"**{i+1}.**"
         text += f"{medal} `{row[0]}` - **{row[1]} pts**\n"
         
     try:
-        if "leaderboard_msg_id" in bot_state:
-            await client.edit_message(channel_id, bot_state["leaderboard_msg_id"], text)
-        else:
-            msg = await client.send_message(channel_id, text)
-            bot_state["leaderboard_msg_id"] = msg.id
-            save_state(bot_state)
+        await client.edit_message(channel_id, lb_msg_id, text)
     except Exception as e:
         print(f"Failed to update channel leaderboard: {e}")
 
@@ -270,8 +276,23 @@ async def send_to_channel(event):
 
 @client.on(events.NewMessage(pattern=r'^/leaderboard'))
 async def show_leaderboard(event):
-    await update_channel_leaderboard()
-    await event.respond("✅ Leaderboard updated in the channel!")
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT username, score FROM leaderboard ORDER BY score DESC, timestamp ASC LIMIT 10")
+    leaders = c.fetchall()
+    conn.close()
+    
+    if not leaders:
+        await event.respond("🏆 **GLOBAL LEADERBOARD** 🏆\n\nNo scores recorded yet!")
+        return
+        
+    text = "🌍 **ALL-TIME GLOBAL LEADERBOARD** 🌍\n*(Highest scores ever recorded across all tests)*\n\n"
+    medals = ["🥇", "🥈", "🥉"]
+    for i, row in enumerate(leaders):
+        medal = medals[i] if i < 3 else f"**{i+1}.**"
+        text += f"{medal} `{row[0]}` - **{row[1]} pts**\n"
+        
+    await event.respond(text)
 
 # --- RENDER DUMMY WEB SERVER ---
 async def handle_ping(request):
