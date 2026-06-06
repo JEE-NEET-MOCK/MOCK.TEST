@@ -38,8 +38,27 @@ client = TelegramClient('bot_session', API_ID, API_HASH).start(bot_token=BOT_TOK
 
 user_selections = {} # To temporarily store their subject choice
 
-def get_db():
-    return psycopg2.connect(SUPABASE_URL)
+SUPABASE_URL = "https://jebcvrozypxsnfmfbgie.supabase.co"
+SUPABASE_KEY = "sb_publishable_EpFqNE0R_81YeH3mgNzQ6A_0_qILYz4"
+HEADERS = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}", "Content-Type": "application/json"}
+
+async def fetch_random_questions(subject, limit):
+    async with aiohttp.ClientSession() as session:
+        url = f"{SUPABASE_URL}/rest/v1/questions?subject=eq.{subject}&select=id"
+        async with session.get(url, headers=HEADERS) as r:
+            data = await r.json()
+            if not data: return []
+            
+        all_ids = [x['id'] for x in data]
+        if limit > len(all_ids): limit = len(all_ids)
+        selected_ids = random.sample(all_ids, limit)
+        id_str = ",".join(map(str, selected_ids))
+        
+        url2 = f"{SUPABASE_URL}/rest/v1/questions?id=in.({id_str})&select=subject,question_text,correct_option"
+        async with session.get(url2, headers=HEADERS) as r2:
+            qs = await r2.json()
+            random.shuffle(qs)
+            return qs
 
 async def create_telegraph_page(test_name, questions_list):
     async with aiohttp.ClientSession() as session:
@@ -109,20 +128,14 @@ async def generate_test_logic(event, subject, num_q, target_channel=None):
     msg = await event.respond("⏳ Generating your custom test from the cloud database...") if target_channel else await event.edit("⏳ Generating your custom test from the cloud database...")
     
     try:
-        conn = get_db()
-        c = conn.cursor()
-        
+        questions_db = []
         if subject == "Full":
-            questions_db = []
             for s in ["physics", "chemistry", "mathematics"]:
-                c.execute("SELECT subject, question_text, correct_option FROM questions WHERE subject=%s ORDER BY RANDOM() LIMIT 25", (s,))
-                questions_db.extend(c.fetchall())
+                questions_db.extend(await fetch_random_questions(s, 25))
         else:
             db_subj = subject.lower()
-            c.execute("SELECT subject, question_text, correct_option FROM questions WHERE subject=%s ORDER BY RANDOM() LIMIT %s", (db_subj, num_q))
-            questions_db = c.fetchall()
+            questions_db.extend(await fetch_random_questions(db_subj, num_q))
             
-        conn.close()
     except Exception as e:
         await msg.edit(f"❌ Database Error: {e}")
         return
@@ -131,14 +144,13 @@ async def generate_test_logic(event, subject, num_q, target_channel=None):
         await msg.edit("❌ Not enough questions in the database for this subject yet!")
         return
         
-    # Format for Website
     exam_questions = []
     for row in questions_db:
         exam_questions.append({
-            "s": row[0],
+            "s": row.get("subject", ""),
             "type": "MCQ",
-            "l": row[1],
-            "c": row[2]
+            "l": row.get("question_text", ""),
+            "c": row.get("correct_option", "")
         })
         
     test_name = f"{subject} Practice Test"
@@ -179,7 +191,7 @@ async def generate_test_logic(event, subject, num_q, target_channel=None):
     else:
         await msg.edit(text, buttons=buttons)
 
-# --- 3. RECEIVE SCORE (No Leaderboard) ---
+# --- 3. RECEIVE SCORE ---
 @client.on(events.NewMessage(pattern=r'^/start res_([a-zA-Z0-9]+)_([a-zA-Z0-9\-_]+)'))
 async def receive_submission(event):
     test_id = event.pattern_match.group(1)
@@ -201,7 +213,7 @@ async def receive_submission(event):
             v2 = val % 5
             ans_str += map_ans.get(v1, 'X') + map_ans.get(v2, 'X')
             
-    ans_str = ans_str[:len(questions)] # Trim dummy char if odd
+    ans_str = ans_str[:len(questions)]
     
     if len(ans_str) != len(questions):
         await event.respond("❌ Invalid answers format.")
@@ -221,16 +233,17 @@ async def receive_submission(event):
             score -= 1
             wrong += 1
             
-    # Save to leaderboard
     sender = await event.get_sender()
     username = getattr(sender, 'username', 'Unknown') or getattr(sender, 'first_name', 'Student')
     
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("INSERT INTO leaderboard (user_id, username, test_id, score) VALUES (%s, %s, %s, %s)", 
-              (event.sender_id, username, test_id, score))
-    conn.commit()
-    conn.close()
+    # Save to leaderboard REST
+    try:
+        async with aiohttp.ClientSession() as session:
+            url = f"{SUPABASE_URL}/rest/v1/leaderboard"
+            payload = {"user_id": event.sender_id, "username": username, "test_id": test_id, "score": score}
+            await session.post(url, headers=HEADERS, json=payload)
+    except Exception as e:
+        print(f"Failed to insert leaderboard score: {e}")
 
     text = (f"📝 **SCORECARD FOR: {active_tests[test_id]['name']}**\n"
             f"👤 **Student:** `{username}`\n"
@@ -243,8 +256,6 @@ async def receive_submission(event):
             f"*(Score saved to Leaderboard!)*")
     
     await event.respond(text)
-    
-    # Update individual leaderboard in channel
     await update_channel_leaderboard(test_id)
     
 async def update_channel_leaderboard(test_id):
@@ -256,11 +267,13 @@ async def update_channel_leaderboard(test_id):
         return
         
     channel_id = -1002457209121
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("SELECT username, score FROM leaderboard WHERE test_id=%s ORDER BY score DESC, timestamp ASC LIMIT 15", (test_id,))
-    leaders = c.fetchall()
-    conn.close()
+    try:
+        async with aiohttp.ClientSession() as session:
+            url = f"{SUPABASE_URL}/rest/v1/leaderboard?test_id=eq.{test_id}&order=score.desc,timestamp.asc&limit=15&select=username,score"
+            async with session.get(url, headers=HEADERS) as r:
+                leaders = await r.json()
+    except:
+        return
     
     if not leaders:
         return
@@ -270,7 +283,7 @@ async def update_channel_leaderboard(test_id):
     medals = ["🥇", "🥈", "🥉"]
     for i, row in enumerate(leaders):
         medal = medals[i] if i < 3 else f"**{i+1}.**"
-        text += f"{medal} `{row[0]}` - **{row[1]} pts**\n"
+        text += f"{medal} `{row.get('username')}` - **{row.get('score')} pts**\n"
         
     try:
         await client.edit_message(channel_id, lb_msg_id, text)
@@ -283,11 +296,14 @@ async def send_to_channel(event):
 
 @client.on(events.NewMessage(pattern=r'^/leaderboard'))
 async def show_leaderboard(event):
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("SELECT username, score FROM leaderboard ORDER BY score DESC, timestamp ASC LIMIT 10")
-    leaders = c.fetchall()
-    conn.close()
+    try:
+        async with aiohttp.ClientSession() as session:
+            url = f"{SUPABASE_URL}/rest/v1/leaderboard?order=score.desc,timestamp.asc&limit=10&select=username,score"
+            async with session.get(url, headers=HEADERS) as r:
+                leaders = await r.json()
+    except:
+        await event.respond("❌ Failed to fetch leaderboard.")
+        return
     
     if not leaders:
         await event.respond("🏆 **GLOBAL LEADERBOARD** 🏆\n\nNo scores recorded yet!")
@@ -297,7 +313,7 @@ async def show_leaderboard(event):
     medals = ["🥇", "🥈", "🥉"]
     for i, row in enumerate(leaders):
         medal = medals[i] if i < 3 else f"**{i+1}.**"
-        text += f"{medal} `{row[0]}` - **{row[1]} pts**\n"
+        text += f"{medal} `{row.get('username')}` - **{row.get('score')} pts**\n"
         
     await event.respond(text)
 
