@@ -212,15 +212,21 @@
             document.getElementById('loader').style.display = 'block';
 
             try {
-                // Generate compact string: 'A', 'B', 'C', 'D' or 'X' for unattempted
-                let ansStr = "";
-                for (let i = 0; i < questions.length; i++) {
-                    let userAns = answers[i] || "X";
-                    ansStr += userAns;
+                const mapAns = {'A':0, 'B':1, 'C':2, 'D':3, 'X':4};
+                const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_";
+                let encoded = "";
+                
+                let i = 0;
+                while (i < questions.length) {
+                    let v1 = mapAns[answers[i] || 'X'];
+                    let v2 = (i + 1 < questions.length) ? mapAns[answers[i+1] || 'X'] : 4;
+                    let val = v1 * 5 + v2;
+                    encoded += chars[val];
+                    i += 2;
                 }
 
                 // Send the path back to the bot
-                let payload = `res_${testId}_${ansStr}`;
+                let payload = `res_${testId}_${encoded}`;
                 window.Telegram.WebApp.openTelegramLink(`https://t.me/${botUsername}?start=${payload}`);
                 window.Telegram.WebApp.close();
             } catch (err) {
