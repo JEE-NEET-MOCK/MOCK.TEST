@@ -179,17 +179,21 @@ async def generate_test_logic(event, subject, num_q, target_channel=None):
     ]
     
     if target_channel:
-        await client.send_message(target_channel, text, buttons=[[Button.url("💻 OPEN EXAM SCREEN", web_app_url)]])
-        lb_msg = await client.send_message(target_channel, f"🏆 **LEADERBOARD FOR: {test_name}** 🏆\n\nNo scores yet. Be the first!")
-        
         try:
-            async with aiohttp.ClientSession() as session:
-                payload = {"id": db_id, "name": test_name, "questions": exam_questions, "lb_msg_id": lb_msg.id}
-                await session.post(f"{SUPABASE_URL}/rest/v1/active_tests", headers=HEADERS, json=payload)
-        except Exception as e:
-            print(f"Failed to save test state: {e}")
+            ch_entity = await client.get_entity(target_channel)
+            await client.send_message(ch_entity, text, buttons=[[Button.url("💻 OPEN EXAM SCREEN", web_app_url)]])
+            lb_msg = await client.send_message(ch_entity, f"🏆 **LEADERBOARD FOR: {test_name}** 🏆\n\nNo scores yet. Be the first!")
             
-        await msg.edit("✅ Test successfully generated and sent to the channel!")
+            try:
+                async with aiohttp.ClientSession() as session:
+                    payload = {"id": db_id, "name": test_name, "questions": exam_questions, "lb_msg_id": lb_msg.id}
+                    await session.post(f"{SUPABASE_URL}/rest/v1/active_tests", headers=HEADERS, json=payload)
+            except Exception as e:
+                print(f"Failed to save test state: {e}")
+                
+            await msg.edit("✅ Test successfully generated and sent to the channel!")
+        except Exception as e:
+            await msg.edit(f"❌ Error sending to channel: {e}\n\nPlease make sure the bot is added as an **Administrator** in the channel @freecengagepdf with **'Post Messages'** permission enabled!")
     else:
         try:
             async with aiohttp.ClientSession() as session:
@@ -363,11 +367,11 @@ async def update_channel_leaderboard(test_id):
 
 @client.on(events.NewMessage(pattern=r'^/send$'))
 async def send_to_channel(event):
-    await generate_test_logic(event, "Full_JEE", 75, target_channel=-1002457209121)
+    await generate_test_logic(event, "Full_JEE", 75, target_channel="freecengagepdf")
 
 @client.on(events.NewMessage(pattern=r'^/send_neet$'))
 async def send_neet_to_channel(event):
-    await generate_test_logic(event, "Full_NEET", 180, target_channel=-1002457209121)
+    await generate_test_logic(event, "Full_NEET", 180, target_channel="freecengagepdf")
 
 @client.on(events.NewMessage(pattern=r'^/leaderboard'))
 async def show_leaderboard(event):
