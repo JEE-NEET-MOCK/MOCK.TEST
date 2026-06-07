@@ -68,9 +68,10 @@ async def create_telegraph_page(test_name, questions_list):
 async def start_handler(event):
     buttons = [
         [Button.inline("🧪 Physics", b"subj_Physics"), Button.inline("⚗️ Chemistry", b"subj_Chemistry")],
-        [Button.inline("📐 Mathematics", b"subj_Mathematics"), Button.inline("🏆 Full Mock Test", b"subj_Full")]
+        [Button.inline("📐 Mathematics", b"subj_Mathematics"), Button.inline("🧬 Biology", b"subj_Biology")],
+        [Button.inline("🏆 JEE Full Mock", b"subj_Full_JEE"), Button.inline("🩺 NEET Full Mock", b"subj_Full_NEET")]
     ]
-    await event.respond("👋 Welcome to the Dynamic JEE Exam Bot!\n\n📚 **Select a Subject to begin:**", buttons=buttons)
+    await event.respond("👋 Welcome to the Dynamic JEE/NEET Exam Bot!\n\n📚 **Select a Subject or Test type to begin:**", buttons=buttons)
 
 @client.on(events.CallbackQuery(pattern=b'^subj_(.*)'))
 async def subject_callback(event):
@@ -78,8 +79,10 @@ async def subject_callback(event):
     user_id = event.sender_id
     user_selections[user_id] = subject
     
-    if subject == "Full":
-        await generate_test_logic(event, "Full", 75)
+    if subject == "Full_JEE":
+        await generate_test_logic(event, "Full_JEE", 75)
+    elif subject == "Full_NEET":
+        await generate_test_logic(event, "Full_NEET", 180)
     else:
         buttons = [
             [Button.inline("10 Questions", b"num_10"), Button.inline("25 Questions", b"num_25")],
@@ -91,9 +94,10 @@ async def subject_callback(event):
 async def back_callback(event):
     buttons = [
         [Button.inline("🧪 Physics", b"subj_Physics"), Button.inline("⚗️ Chemistry", b"subj_Chemistry")],
-        [Button.inline("📐 Mathematics", b"subj_Mathematics"), Button.inline("🏆 Full Mock Test", b"subj_Full")]
+        [Button.inline("📐 Mathematics", b"subj_Mathematics"), Button.inline("🧬 Biology", b"subj_Biology")],
+        [Button.inline("🏆 JEE Full Mock", b"subj_Full_JEE"), Button.inline("🩺 NEET Full Mock", b"subj_Full_NEET")]
     ]
-    await event.edit("📚 **Select a Subject to begin:**", buttons=buttons)
+    await event.edit("📚 **Select a Subject or Test type to begin:**", buttons=buttons)
 
 # --- 2. GENERATE THE TEST ---
 @client.on(events.CallbackQuery(pattern=b'^num_(\d+)'))
@@ -108,9 +112,13 @@ async def generate_test_logic(event, subject, num_q, target_channel=None):
     
     try:
         questions_db = []
-        if subject == "Full":
+        if subject == "Full_JEE":
             for s in ["physics", "chemistry", "mathematics"]:
                 questions_db.extend(await fetch_random_questions(s, 25))
+        elif subject == "Full_NEET":
+            questions_db.extend(await fetch_random_questions("physics", 45))
+            questions_db.extend(await fetch_random_questions("chemistry", 45))
+            questions_db.extend(await fetch_random_questions("biology", 90))
         else:
             db_subj = subject.lower()
             questions_db.extend(await fetch_random_questions(db_subj, num_q))
@@ -132,7 +140,13 @@ async def generate_test_logic(event, subject, num_q, target_channel=None):
             "c": row.get("correct_option", "")
         })
         
-    test_name = f"{subject} Practice Test"
+    if subject == "Full_JEE":
+        test_name = "JEE Full Practice Test"
+    elif subject == "Full_NEET":
+        test_name = "NEET Full Practice Test"
+    else:
+        test_name = f"{subject} Practice Test"
+        
     try:
         telegraph_path = await create_telegraph_page(test_name, exam_questions)
         if not telegraph_path:
@@ -145,7 +159,11 @@ async def generate_test_logic(event, subject, num_q, target_channel=None):
     db_id = ''.join(random.choices(string.ascii_letters + string.digits, k=6))
     bot_info = await client.get_me()
     
-    suggested_time = 180 if len(exam_questions) == 75 else len(exam_questions) * 2
+    if subject in ("Full_JEE", "Full_NEET") or len(exam_questions) in (75, 180):
+        suggested_time = 180
+    else:
+        suggested_time = len(exam_questions) * 2
+        
     web_app_url = f"{YOUR_GITHUB_WEBSITE}/?testid={db_id}&tpath={telegraph_path}&bot={bot_info.username}&time={suggested_time}"
     share_url = f"https://t.me/share/url?url={web_app_url}&text=Take%20this%20{test_name.replace(' ', '%20')}%20Challenge!"
     
@@ -345,7 +363,11 @@ async def update_channel_leaderboard(test_id):
 
 @client.on(events.NewMessage(pattern=r'^/send$'))
 async def send_to_channel(event):
-    await generate_test_logic(event, "Full", 75, target_channel=-1002457209121)
+    await generate_test_logic(event, "Full_JEE", 75, target_channel=-1002457209121)
+
+@client.on(events.NewMessage(pattern=r'^/send_neet$'))
+async def send_neet_to_channel(event):
+    await generate_test_logic(event, "Full_NEET", 180, target_channel=-1002457209121)
 
 @client.on(events.NewMessage(pattern=r'^/leaderboard'))
 async def show_leaderboard(event):
