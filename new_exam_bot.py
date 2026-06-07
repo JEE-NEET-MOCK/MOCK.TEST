@@ -10,37 +10,16 @@ from telethon import TelegramClient, events, Button
 from aiohttp import web
 
 # --- CONFIGURATION ---
-API_ID = int(os.getenv('API_ID', '30688814'))
-API_HASH = os.getenv('API_HASH', 'd7dd867948fd288636f93851566c8543')
-BOT_TOKEN = os.getenv('BOT_TOKEN', '8683671263:AAFrdR1433jORzIuNniMKwDQ-SoDZRrgXao')
+API_ID = 26569238
+API_HASH = '1f50a80e159676e27cb1ed2ec20ed5fb'
+BOT_TOKEN = '8683671263:AAFrdR1433jORzIuNniMKwDQ-SoDZRrgXao'
 YOUR_GITHUB_WEBSITE = "https://jee-neet-mock.github.io/MOCK.TEST" 
-SUPABASE_URL = os.getenv('SUPABASE_URL', 'postgresql://postgres:Dhiraj%400078@db.jebcvrozypxsnfmfbgie.supabase.co:5432/postgres')
-
-# --- STATE MANAGEMENT ---
-STATE_FILE = "exam_bot_state.json"
-
-def load_state():
-    if os.path.exists(STATE_FILE):
-        try:
-            with open(STATE_FILE, "r") as f:
-                return json.load(f)
-        except: pass
-    return {"active_tests": {}}
-
-def save_state(state):
-    with open(STATE_FILE, "w") as f:
-        json.dump(state, f)
-
-bot_state = load_state()
-active_tests = bot_state.setdefault("active_tests", {})
-
-client = TelegramClient('bot_session', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
-
-user_selections = {} # To temporarily store their subject choice
-
 SUPABASE_URL = "https://jebcvrozypxsnfmfbgie.supabase.co"
 SUPABASE_KEY = "sb_publishable_EpFqNE0R_81YeH3mgNzQ6A_0_qILYz4"
 HEADERS = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}", "Content-Type": "application/json"}
+
+client = TelegramClient('bot_session', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
+user_selections = {} # To temporarily store their subject choice
 
 async def fetch_random_questions(subject, limit):
     async with aiohttp.ClientSession() as session:
@@ -164,10 +143,8 @@ async def generate_test_logic(event, subject, num_q, target_channel=None):
         return
         
     db_id = ''.join(random.choices(string.ascii_letters + string.digits, k=6))
-    active_tests[db_id] = { "name": test_name, "questions": exam_questions }
-    save_state(bot_state)
-    
     bot_info = await client.get_me()
+    
     suggested_time = 180 if len(exam_questions) == 75 else len(exam_questions) * 2
     web_app_url = f"{YOUR_GITHUB_WEBSITE}/?testid={db_id}&tpath={telegraph_path}&bot={bot_info.username}&time={suggested_time}"
     share_url = f"https://t.me/share/url?url={web_app_url}&text=Take%20this%20{test_name.replace(' ', '%20')}%20Challenge!"
@@ -186,10 +163,23 @@ async def generate_test_logic(event, subject, num_q, target_channel=None):
     if target_channel:
         await client.send_message(target_channel, text, buttons=[[Button.url("💻 OPEN EXAM SCREEN", web_app_url)]])
         lb_msg = await client.send_message(target_channel, f"🏆 **LEADERBOARD FOR: {test_name}** 🏆\n\nNo scores yet. Be the first!")
-        active_tests[db_id]["lb_msg_id"] = lb_msg.id
-        save_state(bot_state)
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                payload = {"id": db_id, "name": test_name, "questions": exam_questions, "lb_msg_id": lb_msg.id}
+                await session.post(f"{SUPABASE_URL}/rest/v1/active_tests", headers=HEADERS, json=payload)
+        except Exception as e:
+            print(f"Failed to save test state: {e}")
+            
         await msg.edit("✅ Test successfully generated and sent to the channel!")
     else:
+        try:
+            async with aiohttp.ClientSession() as session:
+                payload = {"id": db_id, "name": test_name, "questions": exam_questions, "lb_msg_id": None}
+                await session.post(f"{SUPABASE_URL}/rest/v1/active_tests", headers=HEADERS, json=payload)
+        except Exception as e:
+            print(f"Failed to save test state: {e}")
+            
         await msg.edit(text, buttons=buttons)
 
 # --- 3. RECEIVE SCORE ---
@@ -198,12 +188,22 @@ async def receive_submission(event):
     test_id = event.pattern_match.group(1)
     ans_encoded = event.pattern_match.group(2)
     
-    if test_id not in active_tests:
-        await event.respond("❌ This test is no longer active.")
+    # Fetch test from Supabase
+    try:
+        async with aiohttp.ClientSession() as session:
+            url = f"{SUPABASE_URL}/rest/v1/active_tests?id=eq.{test_id}"
+            async with session.get(url, headers=HEADERS) as r:
+                data = await r.json()
+                if not data:
+                    await event.respond("❌ This test is no longer active.")
+                    return
+                test_data = data[0]
+                questions = test_data["questions"]
+                test_name = test_data["name"]
+    except Exception as e:
+        await event.respond("❌ Database error retrieving test.")
         return
         
-    questions = active_tests[test_id]["questions"]
-    
     chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
     map_ans = {0:'A', 1:'B', 2:'C', 3:'D', 4:'X'}
     ans_str = ""
@@ -274,7 +274,7 @@ async def receive_submission(event):
             async with session.get('https://api.telegra.ph/createAccount', params=acc_payload, timeout=60) as r:
                 token = (await r.json())['result']['access_token']
                 
-            payload = {'access_token': token, 'title': f"Answer Key: {active_tests[test_id]['name']}", 'content': answer_key_html}
+            payload = {'access_token': token, 'title': f"Answer Key: {test_name}", 'content': answer_key_html}
             async with session.post('https://api.telegra.ph/createPage', json=payload, timeout=60) as r2:
                 ans_key_url = (await r2.json())['result']['url']
     except Exception as e:
@@ -287,7 +287,7 @@ async def receive_submission(event):
     if not subject_text:
         subject_text = "🔹 All subjects unattempted.\n"
 
-    text = (f"📝 **SCORECARD FOR: {active_tests[test_id]['name']}**\n"
+    text = (f"📝 **SCORECARD FOR: {test_name}**\n"
             f"👤 **Student:** `{username}`\n"
             f"➖➖➖➖➖➖➖➖➖➖\n"
             f"✅ **Total Correct:** `{correct}`\n"
@@ -305,10 +305,18 @@ async def receive_submission(event):
     await update_channel_leaderboard(test_id)
     
 async def update_channel_leaderboard(test_id):
-    if test_id not in active_tests:
+    try:
+        async with aiohttp.ClientSession() as session:
+            url = f"{SUPABASE_URL}/rest/v1/active_tests?id=eq.{test_id}&select=lb_msg_id,name"
+            async with session.get(url, headers=HEADERS) as r:
+                data = await r.json()
+                if not data: return
+                test_data = data[0]
+                lb_msg_id = test_data.get("lb_msg_id")
+                test_name = test_data.get("name")
+    except:
         return
         
-    lb_msg_id = active_tests[test_id].get("lb_msg_id")
     if not lb_msg_id:
         return
         
@@ -324,7 +332,6 @@ async def update_channel_leaderboard(test_id):
     if not leaders:
         return
         
-    test_name = active_tests[test_id]["name"]
     text = f"🏆 **LEADERBOARD FOR: {test_name}** 🏆\n\n"
     medals = ["🥇", "🥈", "🥉"]
     for i, row in enumerate(leaders):
