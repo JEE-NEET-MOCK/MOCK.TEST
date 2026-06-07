@@ -440,14 +440,167 @@ async def handle_get_test(request):
         return web.json_response({"ok": False, "error": str(e)}, headers=headers)
 
 async def handle_options(request):
-    headers = {"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, OPTIONS"}
+    headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization"
+    }
     return web.Response(headers=headers)
+
+async def handle_submit_test(request):
+    headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization"
+    }
+    try:
+        data = await request.json()
+        test_id = data.get("test_id")
+        ans_encoded = data.get("answers")
+        username = data.get("username", "Student").strip() or "Student"
+        user_id = data.get("user_id") # Optional telegram user ID or anonymous ID
+        
+        # 1. Fetch test from Supabase
+        async with aiohttp.ClientSession() as session:
+            url = f"{SUPABASE_URL}/rest/v1/active_tests?id=eq.{test_id}"
+            async with session.get(url, headers=HEADERS) as r:
+                test_rows = await r.json()
+                if not test_rows:
+                    return web.json_response({"ok": False, "error": "Test not found"}, headers=headers)
+                test_data = test_rows[0]
+                questions = test_data["questions"]
+                test_name = test_data["name"]
+                
+        # Decode answers
+        chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+        map_ans = {0:'A', 1:'B', 2:'C', 3:'D', 4:'X'}
+        ans_str = ""
+        for char in ans_encoded:
+            if char in chars:
+                val = chars.index(char)
+                v1 = val // 5
+                v2 = val % 5
+                ans_str += map_ans.get(v1, 'X') + map_ans.get(v2, 'X')
+        ans_str = ans_str[:len(questions)]
+        
+        if len(ans_str) != len(questions):
+            return web.json_response({"ok": False, "error": "Invalid answers format"}, headers=headers)
+            
+        score_data = {}
+        score = correct = wrong = unattempted = 0
+        answer_key_html = []
+        
+        for i, q in enumerate(questions):
+            subj = q.get("s", "Subject").lower()
+            if subj not in score_data:
+                score_data[subj] = {"correct": 0, "wrong": 0, "score": 0}
+                
+            user_ans = ans_str[i]
+            correct_ans = q.get("c", "").strip().upper()
+            
+            status_text = "✅ Correct" if user_ans == correct_ans else (f"❌ Wrong (Your Answer: {user_ans})" if user_ans != "X" else "⏭ Unattempted")
+            answer_key_html.append({"tag": "h4", "children": [f"Q{i+1}: {status_text} | Correct Answer: {correct_ans}"]})
+            
+            if user_ans == "X":
+                unattempted += 1
+            elif user_ans == correct_ans:
+                score += 4
+                correct += 1
+                score_data[subj]["correct"] += 1
+                score_data[subj]["score"] += 4
+            else:
+                score -= 1
+                wrong += 1
+                score_data[subj]["wrong"] += 1
+                score_data[subj]["score"] -= 1
+                
+        # 2. Save score to leaderboard
+        try:
+            async with aiohttp.ClientSession() as session:
+                del_url = f"{SUPABASE_URL}/rest/v1/leaderboard?user_id=eq.{user_id}&test_id=eq.{test_id}"
+                await session.delete(del_url, headers=HEADERS)
+                
+                url = f"{SUPABASE_URL}/rest/v1/leaderboard"
+                payload = {"user_id": user_id, "username": username, "test_id": test_id, "score": score}
+                await session.post(url, headers=HEADERS, json=payload)
+        except Exception as e:
+            print(f"Failed to update leaderboard score: {e}")
+            
+        # 3. Create Telegraph Answer Key
+        ans_key_url = None
+        try:
+            async with aiohttp.ClientSession() as session:
+                acc_payload = {'short_name': 'JEEBot', 'author_name': 'JEE Exam Bot'}
+                async with session.get('https://api.telegra.ph/createAccount', params=acc_payload, timeout=60) as r:
+                    token = (await r.json())['result']['access_token']
+                    
+                payload = {'access_token': token, 'title': f"Answer Key: {test_name}", 'content': answer_key_html}
+                async with session.post('https://api.telegra.ph/createPage', json=payload, timeout=60) as r2:
+                    ans_key_url = (await r2.json())['result']['url']
+        except Exception as e:
+            print(f"Failed to generate answer key: {e}")
+            
+        # 4. Try sending to Telegram chat if it's a numeric Telegram ID
+        telegram_sent = False
+        subject_text = ""
+        for s_name, s_data in score_data.items():
+            if s_data["correct"] > 0 or s_data["wrong"] > 0 or score > 0:
+                subject_text += f"🔹 **{s_name.capitalize()}:** {s_data['score']} pts (✅ {s_data['correct']} | ❌ {s_data['wrong']})\n"
+        if not subject_text:
+            subject_text = "🔹 All subjects unattempted.\n"
+            
+        text = (f"📝 **SCORECARD FOR: {test_name}**\n"
+                f"👤 **Student:** `{username}`\n"
+                f"➖➖➖➖➖➖➖➖➖➖\n"
+                f"✅ **Total Correct:** `{correct}`\n"
+                f"❌ **Total Incorrect:** `{wrong}`\n"
+                f"⏭ **Unattempted:** `{unattempted}`\n\n"
+                f"📊 **Subject-wise Marks:**\n{subject_text}"
+                f"➖➖➖➖➖➖➖➖➖➖\n"
+                f"🏆 **GRAND TOTAL SCORE:** `{score}`\n"
+                f"➖➖➖➖➖➖➖➖➖➖\n"
+                f"*(Score updated on Leaderboard!)*")
+                
+        buttons = [[Button.url("📖 REVIEW MISTAKES (ANSWER KEY)", ans_key_url)]] if ans_key_url else None
+        
+        try:
+            numeric_user_id = int(str(user_id))
+            if numeric_user_id > 100000:
+                await client.send_message(numeric_user_id, text, buttons=buttons)
+                telegram_sent = True
+        except ValueError:
+            pass 
+        except Exception as e:
+            print(f"Could not send telegram message to user {user_id}: {e}")
+            
+        # Update channel leaderboard in the background
+        asyncio.create_task(update_channel_leaderboard(test_id))
+        
+        return web.json_response({
+            "ok": True,
+            "scorecard": {
+                "test_name": test_name,
+                "username": username,
+                "correct": correct,
+                "wrong": wrong,
+                "unattempted": unattempted,
+                "score": score,
+                "subject_wise": score_data,
+                "ans_key_url": ans_key_url
+            },
+            "telegram_sent": telegram_sent
+        }, headers=headers)
+        
+    except Exception as e:
+        return web.json_response({"ok": False, "error": str(e)}, headers=headers)
 
 async def web_server():
     app = web.Application()
     app.router.add_get('/', handle_ping)
     app.router.add_get('/get_test', handle_get_test)
+    app.router.add_post('/submit_test', handle_submit_test)
     app.router.add_options('/get_test', handle_options)
+    app.router.add_options('/submit_test', handle_options)
     
     runner = web.AppRunner(app)
     await runner.setup()

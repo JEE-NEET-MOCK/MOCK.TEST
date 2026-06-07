@@ -74,11 +74,43 @@
         </div>
     </div>
 
+    <div class="container" id="scorecard-ui" style="display: none; padding: 20px; box-sizing: border-box; max-width: 600px; margin: 20px auto; background: white; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); text-align: center; overflow-y: auto;">
+        <h2 style="color: #2563eb; margin-bottom: 5px;">🏆 Test Completed!</h2>
+        <p id="sc-test-name" style="font-weight: bold; color: #4b5563; margin-top: 0;"></p>
+        
+        <div style="background: #f3f4f6; padding: 15px; border-radius: 8px; margin: 20px 0;">
+            <p style="font-size: 18px; margin: 5px 0;">Student: <span id="sc-username" style="font-weight: bold;"></span></p>
+            <h1 id="sc-score" style="font-size: 48px; color: #1e3a8a; margin: 10px 0;">0 pts</h1>
+        </div>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 25px;">
+            <div style="background: #dcfce7; padding: 10px; border-radius: 6px;">
+                <p style="color: #166534; font-size: 12px; margin: 0;">Correct</p>
+                <h3 id="sc-correct" style="color: #15803d; margin: 5px 0;">0</h3>
+            </div>
+            <div style="background: #fee2e2; padding: 10px; border-radius: 6px;">
+                <p style="color: #991b1b; font-size: 12px; margin: 0;">Incorrect</p>
+                <h3 id="sc-wrong" style="color: #b91c1c; margin: 5px 0;">0</h3>
+            </div>
+            <div style="background: #fef3c7; padding: 10px; border-radius: 6px;">
+                <p style="color: #92400e; font-size: 12px; margin: 0;">Unattempted</p>
+                <h3 id="sc-unattempted" style="color: #b45309; margin: 5px 0;">0</h3>
+            </div>
+        </div>
+        
+        <div id="sc-subject-breakdown" style="text-align: left; margin-bottom: 25px; border-top: 1px solid #e5e7eb; padding-top: 15px;">
+            <!-- Subject breakdown will go here -->
+        </div>
+
+        <button id="sc-btn-ans" class="btn" style="background: #2563eb; color: white; width: 100%; padding: 12px; margin: 5px 0; font-size: 16px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">📖 Review Mistakes (Answer Key)</button>
+        <button class="btn" style="background: #4b5563; color: white; width: 100%; padding: 12px; margin: 5px 0; font-size: 16px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;" onclick="backToBot()">🔙 Return to Bot</button>
+    </div>
+
     <script>
         const urlParams = new URLSearchParams(window.location.search);
         const testId = urlParams.get('testid');
         const tPath = urlParams.get('tpath');
-        const botUsername = urlParams.get('bot');
+        const botUsername = urlParams.get('bot') || 'Mock007bot';
         
         let questions = [];
         let currentIdx = 0;
@@ -233,14 +265,36 @@
         async function submitExam(force = false) {
             if(!force && !confirm("Are you sure you want to submit the exam?")) return;
             
+            // Get user's name
+            let tgUser = window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initDataUnsafe && window.Telegram.WebApp.initDataUnsafe.user;
+            let defaultName = tgUser ? (tgUser.first_name + (tgUser.last_name ? " " + tgUser.last_name : "")) : "";
+            let tgUserId = tgUser ? tgUser.id : null;
+            
+            // Save a persistent anonymous user ID if we don't have a Telegram user ID
+            if (!tgUserId) {
+                let localUserId = localStorage.getItem('anon_user_id');
+                if (!localUserId) {
+                    localUserId = Math.floor(10000000 + Math.random() * 90000000).toString();
+                    localStorage.setItem('anon_user_id', localUserId);
+                }
+                tgUserId = localUserId;
+            }
+            
+            let name = "";
+            if (!force) {
+                name = prompt("Enter your name for the Leaderboard:", defaultName || "Student");
+                if (name === null) return; // User cancelled
+            }
+            name = (name || defaultName || "Student").trim();
+            
             document.getElementById('exam-ui').style.display = 'none';
-            document.getElementById('loader').innerText = "Uploading Answers... 🚀";
+            document.getElementById('loader').innerText = "Uploading Answers & Grading... 🚀";
             document.getElementById('loader').style.display = 'block';
 
+            let encoded = "";
             try {
                 const mapAns = {'A':0, 'B':1, 'C':2, 'D':3, 'X':4};
                 const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_";
-                let encoded = "";
                 
                 let i = 0;
                 while (i < questions.length) {
@@ -251,20 +305,85 @@
                     i += 2;
                 }
 
-                // Send the path back to the bot
-                let payload = `res_${testId}_${encoded}`;
-                window.Telegram.WebApp.openTelegramLink(`https://t.me/${botUsername}?start=${payload}`);
-                window.Telegram.WebApp.close();
-            } catch (err) {
-                alert("Failed to submit: " + err.message);
+                // Call Render API directly
+                const res = await fetch(`${proxyBase}/submit_test`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        test_id: testId,
+                        answers: encoded,
+                        username: name,
+                        user_id: tgUserId
+                    })
+                });
+                
+                if (!res.ok) throw new Error("Server failed to grade test");
+                const resultData = await res.json();
+                if (!resultData.ok) throw new Error(resultData.error || "Unknown server error");
+                
+                // Show scorecard UI
                 document.getElementById('loader').style.display = 'none';
-                document.getElementById('exam-ui').style.display = 'flex';
+                
+                const sc = resultData.scorecard;
+                document.getElementById('sc-test-name').innerText = sc.test_name;
+                document.getElementById('sc-username').innerText = sc.username;
+                document.getElementById('sc-score').innerText = sc.score + " pts";
+                document.getElementById('sc-correct').innerText = sc.correct;
+                document.getElementById('sc-wrong').innerText = sc.wrong;
+                document.getElementById('sc-unattempted').innerText = sc.unattempted;
+                
+                // Build subject breakdown HTML
+                let breakdownHtml = "";
+                for (let sName in sc.subject_wise) {
+                    let sData = sc.subject_wise[sName];
+                    breakdownHtml += `
+                        <div style="margin-bottom: 12px; border-bottom: 1px dashed #e5e7eb; padding-bottom: 8px;">
+                            <div style="display: flex; justify-content: space-between; font-weight: bold; font-size: 14px;">
+                                <span style="text-transform: capitalize; color: #2563eb;">🔹 ${sName}</span>
+                                <span>${sData.score} pts</span>
+                            </div>
+                            <div style="font-size: 12px; color: #6b7280; display: flex; gap: 15px; margin-top: 4px;">
+                                <span>✅ Correct: ${sData.correct}</span>
+                                <span>❌ Incorrect: ${sData.wrong}</span>
+                            </div>
+                        </div>
+                    `;
+                }
+                document.getElementById('sc-subject-breakdown').innerHTML = breakdownHtml;
+                
+                if (sc.ans_key_url) {
+                    document.getElementById('sc-btn-ans').onclick = () => window.open(sc.ans_key_url, '_blank');
+                    document.getElementById('sc-btn-ans').style.display = 'block';
+                } else {
+                    document.getElementById('sc-btn-ans').style.display = 'none';
+                }
+                
+                document.getElementById('scorecard-ui').style.display = 'block';
+                
+            } catch (err) {
+                console.error("Direct API submission failed:", err);
+                if (confirm("Direct submission failed: " + err.message + "\n\nWould you like to fallback to submitting via Telegram Bot redirect instead?")) {
+                    let payload = `res_${testId}_${encoded}`;
+                    window.Telegram.WebApp.openTelegramLink(`https://t.me/${botUsername}?start=${payload}`);
+                    window.Telegram.WebApp.close();
+                } else {
+                    document.getElementById('loader').style.display = 'none';
+                    document.getElementById('exam-ui').style.display = 'flex';
+                }
             }
+        }
+
+        function backToBot() {
+            try {
+                window.Telegram.WebApp.close();
+            } catch (e) {}
+            // Fallback for regular browser:
+            window.location.href = `https://t.me/${botUsername}`;
         }
 
         function startTimer(duration) {
             let timer = duration, hours, minutes, seconds;
-            setInterval(function () {
+            const interval = setInterval(function () {
                 hours = parseInt(timer / 3600, 10);
                 minutes = parseInt((timer % 3600) / 60, 10);
                 seconds = parseInt(timer % 60, 10);
@@ -276,6 +395,7 @@
                 document.getElementById('timer').textContent = "⏱ Time Remaining: " + hStr + mStr + ":" + sStr;
                 
                 if (--timer < 0) {
+                    clearInterval(interval);
                     alert("⏰ Time is up! Auto-submitting your test.");
                     submitExam(true);
                 }
