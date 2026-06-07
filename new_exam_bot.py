@@ -147,14 +147,14 @@ async def generate_test_logic(event, subject, num_q, target_channel=None):
     else:
         test_name = f"{subject} Practice Test"
         
+    telegraph_path = "none"
     try:
-        telegraph_path = await create_telegraph_page(test_name, exam_questions)
-        if not telegraph_path:
-            await msg.edit("❌ Failed to generate Secure Link (Telegraph API returned None). Try again.")
-            return
+        # Skip Telegraph creation for large mock tests (e.g. NEET 180 questions) to avoid size limits.
+        # For smaller tests, try creating a Telegraph page as a fallback.
+        if len(exam_questions) < 100:
+            telegraph_path = await create_telegraph_page(test_name, exam_questions) or "none"
     except Exception as e:
-        await msg.edit(f"❌ Telegraph API Error: {e}")
-        return
+        print(f"Telegraph page creation skipped or failed: {e}")
         
     db_id = ''.join(random.choices(string.ascii_letters + string.digits, k=6))
     bot_info = await client.get_me()
@@ -401,15 +401,41 @@ async def handle_ping(request):
     return web.Response(text="Bot is running!")
 
 async def handle_get_test(request):
-    tpath = request.query.get("tpath")
+    testid = request.query.get("testid")
     headers = {"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, OPTIONS"}
-    if not tpath:
-        return web.json_response({"ok": False, "error": "No tpath"}, headers=headers)
+    if not testid:
+        tpath = request.query.get("tpath")
+        if tpath:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(f"https://api.telegra.ph/getPage/{tpath}?return_content=true") as r:
+                        data = await r.json()
+                        return web.json_response(data, headers=headers)
+            except Exception as e:
+                return web.json_response({"ok": False, "error": str(e)}, headers=headers)
+        return web.json_response({"ok": False, "error": "No testid or tpath"}, headers=headers)
+        
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(f"https://api.telegra.ph/getPage/{tpath}?return_content=true") as r:
+            url = f"{SUPABASE_URL}/rest/v1/active_tests?id=eq.{testid}"
+            async with session.get(url, headers=HEADERS) as r:
                 data = await r.json()
-                return web.json_response(data, headers=headers)
+                if not data:
+                    return web.json_response({"ok": False, "error": "Test not found"}, headers=headers)
+                
+                questions_list = data[0]["questions"]
+                json_str = json.dumps(questions_list)
+                b64_encoded_str = base64.b64encode(json_str.encode('utf-8')).decode('utf-8')
+                
+                response_data = {
+                    "ok": True,
+                    "result": {
+                        "content": [
+                            {"tag": "p", "children": [b64_encoded_str]}
+                        ]
+                    }
+                }
+                return web.json_response(response_data, headers=headers)
     except Exception as e:
         return web.json_response({"ok": False, "error": str(e)}, headers=headers)
 

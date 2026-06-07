@@ -90,7 +90,7 @@
         // Decode Base64 Data
         const proxyBase = urlParams.get('api') || 'https://mock-test-1-qaez.onrender.com';
         const targetUrl = `https://api.telegra.ph/getPage/${tPath}?return_content=true`;
-        const customProxy = `${proxyBase}/get_test?tpath=${tPath}`;
+        const customProxy = testId ? `${proxyBase}/get_test?testid=${testId}` : `${proxyBase}/get_test?tpath=${tPath}`;
 
         async function fetchWithFallback() {
             try {
