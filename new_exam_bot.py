@@ -220,8 +220,14 @@ async def receive_submission(event):
         await event.respond("❌ Invalid answers format.")
         return
         
+    score_data = {}
     score = correct = wrong = unattempted = 0
+    
     for i, q in enumerate(questions):
+        subj = q["s"].lower()
+        if subj not in score_data:
+            score_data[subj] = {"correct": 0, "wrong": 0, "score": 0}
+            
         user_ans = ans_str[i]
         correct_ans = q["c"].strip().upper() if q["c"] else ""
         
@@ -230,31 +236,47 @@ async def receive_submission(event):
         elif user_ans == correct_ans:
             score += 4
             correct += 1
+            score_data[subj]["correct"] += 1
+            score_data[subj]["score"] += 4
         else:
             score -= 1
             wrong += 1
+            score_data[subj]["wrong"] += 1
+            score_data[subj]["score"] -= 1
             
     sender = await event.get_sender()
     username = getattr(sender, 'username', 'Unknown') or getattr(sender, 'first_name', 'Student')
     
-    # Save to leaderboard REST
+    # Save to leaderboard REST (Delete old entry if exists, then insert new to prevent duplicates)
     try:
         async with aiohttp.ClientSession() as session:
+            del_url = f"{SUPABASE_URL}/rest/v1/leaderboard?user_id=eq.{event.sender_id}&test_id=eq.{test_id}"
+            await session.delete(del_url, headers=HEADERS)
+            
             url = f"{SUPABASE_URL}/rest/v1/leaderboard"
             payload = {"user_id": event.sender_id, "username": username, "test_id": test_id, "score": score}
             await session.post(url, headers=HEADERS, json=payload)
     except Exception as e:
-        print(f"Failed to insert leaderboard score: {e}")
+        print(f"Failed to update leaderboard score: {e}")
+
+    subject_text = ""
+    for s_name, s_data in score_data.items():
+        if s_data["correct"] > 0 or s_data["wrong"] > 0 or score > 0:
+            subject_text += f"🔹 **{s_name.capitalize()}:** {s_data['score']} pts (✅ {s_data['correct']} | ❌ {s_data['wrong']})\n"
+    if not subject_text:
+        subject_text = "🔹 All subjects unattempted.\n"
 
     text = (f"📝 **SCORECARD FOR: {active_tests[test_id]['name']}**\n"
             f"👤 **Student:** `{username}`\n"
             f"➖➖➖➖➖➖➖➖➖➖\n"
-            f"✅ **Correct:** `{correct}`\n"
-            f"❌ **Incorrect:** `{wrong}`\n"
-            f"⏭ **Unattempted:** `{unattempted}`\n"
-            f"🏆 **Total Score:** `{score}`\n"
+            f"✅ **Total Correct:** `{correct}`\n"
+            f"❌ **Total Incorrect:** `{wrong}`\n"
+            f"⏭ **Unattempted:** `{unattempted}`\n\n"
+            f"📊 **Subject-wise Marks:**\n{subject_text}"
             f"➖➖➖➖➖➖➖➖➖➖\n"
-            f"*(Score saved to Leaderboard!)*")
+            f"🏆 **GRAND TOTAL SCORE:** `{score}`\n"
+            f"➖➖➖➖➖➖➖➖➖➖\n"
+            f"*(Score updated on Leaderboard!)*")
     
     await event.respond(text)
     await update_channel_leaderboard(test_id)
