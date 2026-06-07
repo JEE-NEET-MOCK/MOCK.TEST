@@ -10,8 +10,8 @@ from telethon import TelegramClient, events, Button
 from aiohttp import web
 
 # --- CONFIGURATION ---
-API_ID = 26569238
-API_HASH = '1f50a80e159676e27cb1ed2ec20ed5fb'
+API_ID = 30688814
+API_HASH = 'd7dd867948fd288636f93851566c8543'
 BOT_TOKEN = '8683671263:AAFrdR1433jORzIuNniMKwDQ-SoDZRrgXao'
 YOUR_GITHUB_WEBSITE = "https://jee-neet-mock.github.io/MOCK.TEST" 
 SUPABASE_URL = "https://jebcvrozypxsnfmfbgie.supabase.co"
