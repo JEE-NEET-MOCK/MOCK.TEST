@@ -457,7 +457,7 @@ async def handle_submit_test(request):
         data = await request.json()
         test_id = data.get("test_id")
         ans_encoded = data.get("answers")
-        username = data.get("username", "Student").strip() or "Student"
+        username = str(data.get("username") or "Student").strip() or "Student"
         user_id = data.get("user_id") # Optional telegram user ID or anonymous ID
         
         # 1. Fetch test from Supabase
@@ -491,12 +491,12 @@ async def handle_submit_test(request):
         answer_key_html = []
         
         for i, q in enumerate(questions):
-            subj = q.get("s", "Subject").lower()
+            subj = str(q.get("s") or "Subject").lower()
             if subj not in score_data:
                 score_data[subj] = {"correct": 0, "wrong": 0, "score": 0}
                 
             user_ans = ans_str[i]
-            correct_ans = q.get("c", "").strip().upper()
+            correct_ans = str(q.get("c") or "").strip().upper()
             
             status_text = "✅ Correct" if user_ans == correct_ans else (f"❌ Wrong (Your Answer: {user_ans})" if user_ans != "X" else "⏭ Unattempted")
             answer_key_html.append({"tag": "h4", "children": [f"Q{i+1}: {status_text} | Correct Answer: {correct_ans}"]})
@@ -515,16 +515,18 @@ async def handle_submit_test(request):
                 score_data[subj]["score"] -= 1
                 
         # 2. Save score to leaderboard
-        try:
-            async with aiohttp.ClientSession() as session:
-                del_url = f"{SUPABASE_URL}/rest/v1/leaderboard?user_id=eq.{user_id}&test_id=eq.{test_id}"
-                await session.delete(del_url, headers=HEADERS)
-                
-                url = f"{SUPABASE_URL}/rest/v1/leaderboard"
-                payload = {"user_id": user_id, "username": username, "test_id": test_id, "score": score}
-                await session.post(url, headers=HEADERS, json=payload)
-        except Exception as e:
-            print(f"Failed to update leaderboard score: {e}")
+        if user_id:
+            try:
+                numeric_uid = int(str(user_id))
+                async with aiohttp.ClientSession() as session:
+                    del_url = f"{SUPABASE_URL}/rest/v1/leaderboard?user_id=eq.{numeric_uid}&test_id=eq.{test_id}"
+                    await session.delete(del_url, headers=HEADERS)
+                    
+                    url = f"{SUPABASE_URL}/rest/v1/leaderboard"
+                    payload = {"user_id": numeric_uid, "username": username, "test_id": test_id, "score": score}
+                    await session.post(url, headers=HEADERS, json=payload)
+            except Exception as e:
+                print(f"Failed to update leaderboard score: {e}")
             
         # 3. Create Telegraph Answer Key
         ans_key_url = None
@@ -563,15 +565,16 @@ async def handle_submit_test(request):
                 
         buttons = [[Button.url("📖 REVIEW MISTAKES (ANSWER KEY)", ans_key_url)]] if ans_key_url else None
         
-        try:
-            numeric_user_id = int(str(user_id))
-            if numeric_user_id > 100000:
-                await client.send_message(numeric_user_id, text, buttons=buttons)
-                telegram_sent = True
-        except ValueError:
-            pass 
-        except Exception as e:
-            print(f"Could not send telegram message to user {user_id}: {e}")
+        if user_id:
+            try:
+                numeric_user_id = int(str(user_id))
+                if numeric_user_id > 100000:
+                    await client.send_message(numeric_user_id, text, buttons=buttons)
+                    telegram_sent = True
+            except ValueError:
+                pass 
+            except Exception as e:
+                print(f"Could not send telegram message to user {user_id}: {e}")
             
         # Update channel leaderboard in the background
         asyncio.create_task(update_channel_leaderboard(test_id))
