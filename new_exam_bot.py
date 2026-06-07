@@ -367,9 +367,29 @@ async def show_leaderboard(event):
 async def handle_ping(request):
     return web.Response(text="Bot is running!")
 
+async def handle_get_test(request):
+    tpath = request.query.get("tpath")
+    headers = {"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, OPTIONS"}
+    if not tpath:
+        return web.json_response({"ok": False, "error": "No tpath"}, headers=headers)
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"https://api.telegra.ph/getPage/{tpath}?return_content=true") as r:
+                data = await r.json()
+                return web.json_response(data, headers=headers)
+    except Exception as e:
+        return web.json_response({"ok": False, "error": str(e)}, headers=headers)
+
+async def handle_options(request):
+    headers = {"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, OPTIONS"}
+    return web.Response(headers=headers)
+
 async def web_server():
     app = web.Application()
     app.router.add_get('/', handle_ping)
+    app.router.add_get('/get_test', handle_get_test)
+    app.router.add_options('/get_test', handle_options)
+    
     runner = web.AppRunner(app)
     await runner.setup()
     port = int(os.environ.get("PORT", 8080))

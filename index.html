@@ -88,10 +88,24 @@
         window.Telegram.WebApp.expand();
 
         // Decode Base64 Data
-        fetch(`https://api.telegra.ph/getPage/${tPath}?return_content=true`)
-            .then(res => res.json())
+        const proxyBase = urlParams.get('api') || 'https://mock-test-1-qaez.onrender.com';
+        const targetUrl = `https://api.telegra.ph/getPage/${tPath}?return_content=true`;
+        const customProxy = `${proxyBase}/get_test?tpath=${tPath}`;
+
+        async function fetchWithFallback() {
+            try {
+                let res = await fetch(customProxy);
+                if (!res.ok) throw new Error("Proxy failed");
+                return await res.json();
+            } catch (e1) {
+                let res2 = await fetch(targetUrl);
+                return await res2.json();
+            }
+        }
+
+        fetchWithFallback()
             .then(data => {
-                if(!data.ok) throw new Error("API Not OK");
+                if(!data.ok) throw new Error("API Not OK: " + (data.error || "Unknown"));
                 
                 let b64String = "";
                 data.result.content.forEach(p => {
