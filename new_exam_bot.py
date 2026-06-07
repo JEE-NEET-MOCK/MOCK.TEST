@@ -168,10 +168,10 @@ async def generate_test_logic(event, subject, num_q, target_channel=None):
     save_state(bot_state)
     
     bot_info = await client.get_me()
-    web_app_url = f"{YOUR_GITHUB_WEBSITE}/?testid={db_id}&tpath={telegraph_path}&bot={bot_info.username}"
+    suggested_time = 180 if len(exam_questions) == 75 else len(exam_questions) * 2
+    web_app_url = f"{YOUR_GITHUB_WEBSITE}/?testid={db_id}&tpath={telegraph_path}&bot={bot_info.username}&time={suggested_time}"
     share_url = f"https://t.me/share/url?url={web_app_url}&text=Take%20this%20{test_name.replace(' ', '%20')}%20Challenge!"
     
-    suggested_time = 180 if len(exam_questions) == 75 else len(exam_questions) * 2
     text = (f"🎯 **YOUR CUSTOM TEST IS READY!** 🎯\n\n"
             f"📌 **Topic:** `{test_name}`\n"
             f"🔢 **Questions:** `{len(exam_questions)}`\n"
@@ -223,6 +223,8 @@ async def receive_submission(event):
     score_data = {}
     score = correct = wrong = unattempted = 0
     
+    answer_key_html = []
+    
     for i, q in enumerate(questions):
         subj = q["s"].lower()
         if subj not in score_data:
@@ -230,6 +232,11 @@ async def receive_submission(event):
             
         user_ans = ans_str[i]
         correct_ans = q["c"].strip().upper() if q["c"] else ""
+        
+        # Build answer key HTML
+        color = "#22c55e" if user_ans == correct_ans else ("#ef4444" if user_ans != "X" else "#f59e0b")
+        status_text = "✅ Correct" if user_ans == correct_ans else (f"❌ Wrong (Your Answer: {user_ans})" if user_ans != "X" else "⏭ Unattempted")
+        answer_key_html.append({"tag": "h4", "children": [f"Q{i+1}: {status_text} | Correct Answer: {correct_ans}"]})
         
         if user_ans == "X":
             unattempted += 1
@@ -259,6 +266,20 @@ async def receive_submission(event):
     except Exception as e:
         print(f"Failed to update leaderboard score: {e}")
 
+    # Generate telegraph for Answer Key
+    ans_key_url = None
+    try:
+        async with aiohttp.ClientSession() as session:
+            acc_payload = {'short_name': 'JEEBot', 'author_name': 'JEE Exam Bot'}
+            async with session.get('https://api.telegra.ph/createAccount', params=acc_payload, timeout=60) as r:
+                token = (await r.json())['result']['access_token']
+                
+            payload = {'access_token': token, 'title': f"Answer Key: {active_tests[test_id]['name']}", 'content': answer_key_html}
+            async with session.post('https://api.telegra.ph/createPage', json=payload, timeout=60) as r2:
+                ans_key_url = (await r2.json())['result']['url']
+    except Exception as e:
+        print(f"Failed to generate answer key: {e}")
+
     subject_text = ""
     for s_name, s_data in score_data.items():
         if s_data["correct"] > 0 or s_data["wrong"] > 0 or score > 0:
@@ -278,7 +299,9 @@ async def receive_submission(event):
             f"➖➖➖➖➖➖➖➖➖➖\n"
             f"*(Score updated on Leaderboard!)*")
     
-    await event.respond(text)
+    buttons = [[Button.url("📖 REVIEW MISTAKES (ANSWER KEY)", ans_key_url)]] if ans_key_url else None
+    
+    await event.respond(text, buttons=buttons)
     await update_channel_leaderboard(test_id)
     
 async def update_channel_leaderboard(test_id):

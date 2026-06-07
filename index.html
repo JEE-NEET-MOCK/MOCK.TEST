@@ -111,11 +111,26 @@
                 document.getElementById('exam-ui').style.display = 'flex';
                 buildGrid();
                 showQuestion(0);
-                startTimer(questions.length * 2 * 60);
+                const suggestedTime = urlParams.get('time') ? parseInt(urlParams.get('time')) * 60 : questions.length * 2 * 60;
+                startTimer(suggestedTime);
             })
             .catch(err => {
                 document.getElementById('loader').innerHTML = `❌ Data Decoding Error.<br>Details: ${err.message}`;
             });
+
+        // --- ANTI CHEAT SYSTEM ---
+        let cheatWarnings = 0;
+        document.addEventListener("visibilitychange", () => {
+            if (document.hidden && document.getElementById('exam-ui').style.display !== 'none') {
+                cheatWarnings++;
+                if (cheatWarnings >= 3) {
+                    alert("🚨 ANTI-CHEAT TRIGGERED!\nYou have switched tabs 3 times. Your test is being automatically submitted!");
+                    submitExam(true);
+                } else {
+                    alert(`⚠️ WARNING (${cheatWarnings}/3): Do not switch tabs or open other apps!\nYour test will be auto-submitted on the 3rd warning.`);
+                }
+            }
+        });
 
         function buildGrid() {
             const grid = document.getElementById('q-grid');
@@ -201,14 +216,11 @@
             if(newIdx >= 0 && newIdx < questions.length) showQuestion(newIdx);
         }
 
-        async function submitExam() {
-            if(!confirm("Are you sure you want to submit the exam?")) return;
+        async function submitExam(force = false) {
+            if(!force && !confirm("Are you sure you want to submit the exam?")) return;
             
             document.getElementById('exam-ui').style.display = 'none';
             document.getElementById('loader').innerText = "Uploading Answers... 🚀";
-            document.getElementById('loader').style.display = 'block';
-
-            document.getElementById('loader').innerText = "Submitting Answers... 🚀";
             document.getElementById('loader').style.display = 'block';
 
             try {
@@ -237,14 +249,22 @@
         }
 
         function startTimer(duration) {
-            let timer = duration, minutes, seconds;
+            let timer = duration, hours, minutes, seconds;
             setInterval(function () {
-                minutes = parseInt(timer / 60, 10);
+                hours = parseInt(timer / 3600, 10);
+                minutes = parseInt((timer % 3600) / 60, 10);
                 seconds = parseInt(timer % 60, 10);
-                minutes = minutes < 10 ? "0" + minutes : minutes;
-                seconds = seconds < 10 ? "0" + seconds : seconds;
-                document.getElementById('timer').textContent = "⏱ Time Remaining: " + minutes + ":" + seconds;
-                if (--timer < 0) submitExam();
+                
+                let hStr = hours > 0 ? hours + ":" : "";
+                let mStr = minutes < 10 ? "0" + minutes : minutes;
+                let sStr = seconds < 10 ? "0" + seconds : seconds;
+                
+                document.getElementById('timer').textContent = "⏱ Time Remaining: " + hStr + mStr + ":" + sStr;
+                
+                if (--timer < 0) {
+                    alert("⏰ Time is up! Auto-submitting your test.");
+                    submitExam(true);
+                }
             }, 1000);
         }
     </script>
